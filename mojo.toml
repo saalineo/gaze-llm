@@ -1,0 +1,5 @@
+[package]
+name = "mojocore"
+version = "0.1.0"
+description = "compute kernels and attention backends"
+authors = ["saalineo"]

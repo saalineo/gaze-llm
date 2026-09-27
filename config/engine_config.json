@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "max_batch_size": 32,
+  "block_size": 16,
+  "max_num_blocks": 1024,
+  "num_gpu_blocks": 512,
+  "mojo_library_path": "target/libmojo_core.so"
+}

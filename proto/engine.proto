@@ -1,0 +1,23 @@
+syntax = "proto3";
+package gaze.v1;
+
+service InferenceService {
+  rpc StreamGenerate (GenerateRequest) returns (stream GenerateResponse);
+}
+
+message GenerateRequest {
+  string request_id = 1;
+  string prompt = 2;
+  int32 max_new_tokens = 3;
+  float temperature = 4;
+  float top_p = 5;
+  int32 top_k = 6;
+}
+
+message GenerateResponse {
+  string request_id = 1;
+  string token_text = 2;
+  int32 token_id = 3;
+  bool is_finished = 4;
+  string finish_reason = 5;
+}

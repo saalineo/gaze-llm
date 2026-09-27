@@ -7,14 +7,10 @@ use tracing::{error, info};
 
 fn parse_config_path() -> String {
     let args: Vec<String> = env::args().collect();
-    let mut i = 1;
-    while i < args.len() {
-        if args[i] == "--config" && i + 1 < args.len() {
-            return args[i + 1].clone();
-        }
-        i += 1;
-    }
-    "config/engine_config.json".to_string()
+    args.windows(2)
+        .find(|pair| pair[0] == "--config")
+        .map(|pair| pair[1].clone())
+        .unwrap_or_else(|| "config/engine_config.json".to_string())
 }
 
 #[tokio::main]
@@ -26,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Loading configuration from '{}'", config_path);
 
     let config = match EngineConfig::load_from_file(&config_path) {
-        Ok(cfg) => cfg,
+        Ok(loaded_config) => loaded_config,
         Err(err) => {
             error!("Failed to load configuration from '{}': {}", config_path, err);
             process::exit(1);

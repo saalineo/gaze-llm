@@ -55,11 +55,11 @@ impl EngineConfig {
             path: path_str.clone(),
             source,
         })?;
-        let cfg: EngineConfig = serde_json::from_str(&content).map_err(|source| ConfigError::Json {
+        let config: EngineConfig = serde_json::from_str(&content).map_err(|source| ConfigError::Json {
             path: path_str,
             source,
         })?;
-        Ok(cfg)
+        Ok(config)
     }
 }
 
@@ -79,21 +79,21 @@ mod tests {
             "mojo_library_path": "target/libmojo_core.so"
         }"#;
 
-        let cfg: EngineConfig = serde_json::from_str(json).expect("Failed to deserialize JSON");
-        assert_eq!(cfg.host, "127.0.0.1");
-        assert_eq!(cfg.port, 8080);
-        assert_eq!(cfg.max_batch_size, 32);
-        assert_eq!(cfg.block_size, 16);
-        assert_eq!(cfg.max_num_blocks, 1024);
-        assert_eq!(cfg.num_gpu_blocks, 512);
-        assert_eq!(cfg.mojo_library_path, "target/libmojo_core.so");
+        let config: EngineConfig = serde_json::from_str(json).expect("Valid JSON should deserialize");
+        assert_eq!(config.host, "127.0.0.1");
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.max_batch_size, 32);
+        assert_eq!(config.block_size, 16);
+        assert_eq!(config.max_num_blocks, 1024);
+        assert_eq!(config.num_gpu_blocks, 512);
+        assert_eq!(config.mojo_library_path, "target/libmojo_core.so");
     }
 
     #[test]
     fn test_load_nonexistent_file() {
-        let result = EngineConfig::load_from_file("nonexistent_config_path_12345.json");
-        assert!(result.is_err());
-        let err = result.unwrap_err();
+        let load_result = EngineConfig::load_from_file("nonexistent_config_path_12345.json");
+        assert!(load_result.is_err());
+        let err = load_result.unwrap_err();
         assert!(err.to_string().contains("Failed to read configuration file"));
     }
 
@@ -102,12 +102,12 @@ mod tests {
         use std::io::Write;
         let temp_dir = std::env::temp_dir();
         let file_path = temp_dir.join("invalid_config_test.json");
-        let mut f = fs::File::create(&file_path).unwrap();
-        writeln!(f, "{{ invalid json ").unwrap();
+        let mut file = fs::File::create(&file_path).expect("Failed to create temporary file");
+        writeln!(file, "{{ invalid json ").expect("Failed to write invalid json");
 
-        let result = EngineConfig::load_from_file(&file_path);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
+        let load_result = EngineConfig::load_from_file(&file_path);
+        assert!(load_result.is_err());
+        let err = load_result.unwrap_err();
         assert!(err.to_string().contains("Failed to parse JSON configuration"));
         let _ = fs::remove_file(file_path);
     }

@@ -1,4 +1,4 @@
-//! Axum & Tokio asynchronous HTTP API server.
+//! Axum asynchronous HTTP API server.
 
 use crate::config::EngineConfig;
 use axum::{
@@ -7,14 +7,12 @@ use axum::{
 };
 use std::net::SocketAddr;
 
-/// Builds the Axum router with defined endpoints.
 pub fn create_router() -> Router {
     Router::new()
         .route("/health", get(|| async { "OK" }))
         .route("/v1/completions", post(handle_completion))
 }
 
-/// Starts the asynchronous HTTP API server.
 pub async fn start_http_server(config: EngineConfig) -> Result<(), Box<dyn std::error::Error>> {
     let app = create_router();
 
@@ -26,8 +24,7 @@ pub async fn start_http_server(config: EngineConfig) -> Result<(), Box<dyn std::
 }
 
 async fn handle_completion(Json(_payload): Json<serde_json::Value>) -> &'static str {
-    // Pipeline handler stub
-    "{\"text\": \"stub\", \"tokens\": []}"
+    r#"{"text": "stub", "tokens": []}"#
 }
 
 #[cfg(test)]
@@ -35,7 +32,7 @@ mod tests {
     use super::*;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
-    use tower::ServiceExt; // for `oneshot`
+    use tower::ServiceExt;
 
     #[tokio::test]
     async fn test_health_endpoint() {
@@ -46,16 +43,16 @@ mod tests {
                 Request::builder()
                     .uri("/health")
                     .body(Body::empty())
-                    .unwrap(),
+                    .expect("Failed to build HTTP request"),
             )
             .await
-            .unwrap();
+            .expect("Service execution failed");
 
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
-            .unwrap();
+            .expect("Failed to read response body");
         assert_eq!(&body[..], b"OK");
     }
 
@@ -70,16 +67,16 @@ mod tests {
                     .uri("/v1/completions")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"prompt": "Hello"}"#))
-                    .unwrap(),
+                    .expect("Failed to build HTTP request"),
             )
             .await
-            .unwrap();
+            .expect("Service execution failed");
 
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
-            .unwrap();
+            .expect("Failed to read response body");
         assert_eq!(&body[..], b"{\"text\": \"stub\", \"tokens\": []}");
     }
 }

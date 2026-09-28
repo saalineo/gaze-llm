@@ -26,6 +26,8 @@ typedef struct {
     const char* error_message;
 } FfiResult;
 
+FfiResult mojo_execute_kernel(const MojoTensorBuffer* input, MojoTensorBuffer* output);
+
 #ifdef __cplusplus
 }
 #endif

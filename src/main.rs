@@ -24,7 +24,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = match EngineConfig::load_from_file(&config_path) {
         Ok(loaded_config) => loaded_config,
         Err(err) => {
-            error!("Failed to load configuration from '{}': {}", config_path, err);
+            error!(
+                "Failed to load configuration from '{}': {}",
+                config_path, err
+            );
             process::exit(1);
         }
     };

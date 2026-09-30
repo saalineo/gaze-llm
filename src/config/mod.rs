@@ -20,18 +20,32 @@ pub struct EngineConfig {
 /// Errors encountered when loading engine configuration.
 #[derive(Debug)]
 pub enum ConfigError {
-    Io { path: String, source: std::io::Error },
-    Json { path: String, source: serde_json::Error },
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
+    Json {
+        path: String,
+        source: serde_json::Error,
+    },
 }
 
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ConfigError::Io { path, source } => {
-                write!(f, "Failed to read configuration file at '{}': {}", path, source)
+                write!(
+                    f,
+                    "Failed to read configuration file at '{}': {}",
+                    path, source
+                )
             }
             ConfigError::Json { path, source } => {
-                write!(f, "Failed to parse JSON configuration in '{}': {}", path, source)
+                write!(
+                    f,
+                    "Failed to parse JSON configuration in '{}': {}",
+                    path, source
+                )
             }
         }
     }
@@ -55,10 +69,11 @@ impl EngineConfig {
             path: path_str.clone(),
             source,
         })?;
-        let config: EngineConfig = serde_json::from_str(&content).map_err(|source| ConfigError::Json {
-            path: path_str,
-            source,
-        })?;
+        let config: EngineConfig =
+            serde_json::from_str(&content).map_err(|source| ConfigError::Json {
+                path: path_str,
+                source,
+            })?;
         Ok(config)
     }
 }
@@ -79,7 +94,8 @@ mod tests {
             "mojo_library_path": "target/libmojo_core.so"
         }"#;
 
-        let config: EngineConfig = serde_json::from_str(json).expect("Valid JSON should deserialize");
+        let config: EngineConfig =
+            serde_json::from_str(json).expect("Valid JSON should deserialize");
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 8080);
         assert_eq!(config.max_batch_size, 32);
@@ -94,7 +110,9 @@ mod tests {
         let load_result = EngineConfig::load_from_file("nonexistent_config_path_12345.json");
         assert!(load_result.is_err());
         let err = load_result.unwrap_err();
-        assert!(err.to_string().contains("Failed to read configuration file"));
+        assert!(err
+            .to_string()
+            .contains("Failed to read configuration file"));
     }
 
     #[test]
@@ -108,7 +126,9 @@ mod tests {
         let load_result = EngineConfig::load_from_file(&file_path);
         assert!(load_result.is_err());
         let err = load_result.unwrap_err();
-        assert!(err.to_string().contains("Failed to parse JSON configuration"));
+        assert!(err
+            .to_string()
+            .contains("Failed to parse JSON configuration"));
         let _ = fs::remove_file(file_path);
     }
 }

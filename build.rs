@@ -1,6 +1,5 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::configure()
-        .compile(&["proto/engine.proto"], &["proto"])?;
+    tonic_build::configure().compile(&["proto/engine.proto"], &["proto"])?;
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")?;
     println!("cargo:rustc-link-search=native={}/target", manifest_dir);
@@ -11,4 +10,3 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

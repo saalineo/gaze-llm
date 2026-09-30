@@ -89,11 +89,7 @@ mod tests {
         assert_eq!(buffer.align(), align);
         let ptr = buffer.as_mut_ptr();
         assert!(!ptr.is_null());
-        assert_eq!(
-            (ptr as usize) % align,
-            0,
-            "Pointer must be 64-byte aligned"
-        );
+        assert_eq!((ptr as usize) % align, 0, "Pointer must be 64-byte aligned");
 
         unsafe {
             ptr.write(0xAA);
@@ -111,12 +107,11 @@ mod tests {
 
     #[test]
     fn test_allocate_invalid_alignment_fails() {
-        let err = RawMemoryBuffer::allocate(1024, 3)
-            .expect_err("Non-power-of-two alignment must fail");
+        let err =
+            RawMemoryBuffer::allocate(1024, 3).expect_err("Non-power-of-two alignment must fail");
         assert!(err.contains("Invalid layout"));
 
-        let err_zero = RawMemoryBuffer::allocate(1024, 0)
-            .expect_err("Zero alignment must fail");
+        let err_zero = RawMemoryBuffer::allocate(1024, 0).expect_err("Zero alignment must fail");
         assert!(err_zero.contains("Invalid layout"));
     }
 

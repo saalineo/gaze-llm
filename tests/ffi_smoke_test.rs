@@ -20,9 +20,8 @@ fn test_rust_to_mojo_ffi_smoke() {
     };
 
     // Call dynamic FFI method
-    let kernel_result = unsafe {
-        gazellm::ffi::bridge::mojo_execute_kernel(&in_tensor, &mut out_tensor)
-    };
+    let kernel_result =
+        unsafe { gazellm::ffi::bridge::mojo_execute_kernel(&in_tensor, &mut out_tensor) };
     assert_eq!(kernel_result.status_code, 0);
 }
 
@@ -47,4 +46,3 @@ fn test_rust_to_mojo_safe_bridge_smoke() {
     let bridge_result = gazellm::ffi::bridge::safe_mojo_execute(&in_tensor, &mut out_tensor);
     assert!(bridge_result.is_ok());
 }
-

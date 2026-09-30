@@ -17,7 +17,8 @@ pub struct EngineInferenceService;
 
 #[tonic::async_trait]
 impl InferenceService for EngineInferenceService {
-    type StreamGenerateStream = Pin<Box<dyn Stream<Item = Result<GenerateResponse, Status>> + Send + 'static>>;
+    type StreamGenerateStream =
+        Pin<Box<dyn Stream<Item = Result<GenerateResponse, Status>> + Send + 'static>>;
 
     async fn stream_generate(
         &self,
@@ -61,12 +62,18 @@ mod tests {
         };
 
         let mut buffer = Vec::new();
-        request.encode(&mut buffer).expect("Failed to encode GenerateRequest");
+        request
+            .encode(&mut buffer)
+            .expect("Failed to encode GenerateRequest");
         assert!(!buffer.is_empty());
 
-        let decoded_request = GenerateRequest::decode(&buffer[..]).expect("Failed to decode GenerateRequest");
+        let decoded_request =
+            GenerateRequest::decode(&buffer[..]).expect("Failed to decode GenerateRequest");
         assert_eq!(decoded_request.request_id, "req-12345");
-        assert_eq!(decoded_request.prompt, "The quick brown fox jumps over the lazy dog");
+        assert_eq!(
+            decoded_request.prompt,
+            "The quick brown fox jumps over the lazy dog"
+        );
         assert_eq!(decoded_request.max_new_tokens, 128);
         assert!((decoded_request.temperature - 0.7).abs() < f32::EPSILON);
         assert!((decoded_request.top_p - 0.9).abs() < f32::EPSILON);
@@ -129,12 +136,13 @@ mod tests {
         let nanos_per_op = elapsed.as_nanos() / iterations as u128;
         println!(
             "Protobuf roundtrip serialization: {} iterations in {:?}, avg {} ns/op, total {} bytes",
-            iterations,
-            elapsed,
-            nanos_per_op,
-            total_bytes
+            iterations, elapsed, nanos_per_op, total_bytes
         );
 
-        assert!(nanos_per_op < 10_000, "Serialization took too long: {} ns/op", nanos_per_op);
+        assert!(
+            nanos_per_op < 10_000,
+            "Serialization took too long: {} ns/op",
+            nanos_per_op
+        );
     }
 }

@@ -139,7 +139,11 @@ mod tests {
 
     #[test]
     fn test_dlopen_missing_symbol_fails() {
-        let libc_candidates = ["libc.so.6", "/usr/lib/libc.so.6", "/lib/x86_64-linux-gnu/libc.so.6"];
+        let libc_candidates = [
+            "libc.so.6",
+            "/usr/lib/libc.so.6",
+            "/lib/x86_64-linux-gnu/libc.so.6",
+        ];
         for candidate in &libc_candidates {
             if Path::new(candidate).exists() || *candidate == "libc.so.6" {
                 if let Ok(lib) = unsafe { Library::new(candidate) } {

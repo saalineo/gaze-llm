@@ -14,14 +14,14 @@ pub fn safe_mojo_execute(
     output: &mut MojoTensorBuffer,
 ) -> Result<(), String> {
     // SAFETY: Coercing valid Rust references to raw pointers for the C-ABI call.
-    let kernel_res = unsafe { mojo_execute_kernel(input, output) };
-    if kernel_res.is_ok() {
+    let kernel_result = unsafe { mojo_execute_kernel(input, output) };
+    if kernel_result.is_ok() {
         return Ok(());
     }
 
-    if !kernel_res.error_message.is_null() {
+    if !kernel_result.error_message.is_null() {
         // SAFETY: Error pointer is non-null and points to a valid null-terminated C string.
-        let msg = unsafe { CStr::from_ptr(kernel_res.error_message) };
+        let msg = unsafe { CStr::from_ptr(kernel_result.error_message) };
         Err(msg.to_string_lossy().into_owned())
     } else {
         Err("Unknown Mojo execution error".to_string())

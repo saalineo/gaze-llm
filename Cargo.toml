@@ -15,9 +15,15 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 libc = "0.2"
+libloading = "0.8"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }
 
+[[test]]
+name = "ffi_smoke_test"
+path = "tests/ffi_smoke_test.rs"
+
 [build-dependencies]
 tonic-build = "0.11"
+

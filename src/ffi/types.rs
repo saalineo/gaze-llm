@@ -117,13 +117,13 @@ mod tests {
 
     #[test]
     fn test_ffi_result_helpers() {
-        let ok_res = FfiResult::ok();
-        assert!(ok_res.is_ok());
-        assert_eq!(ok_res.status_code, 0);
-        assert!(ok_res.error_message.is_null());
+        let ok_result = FfiResult::ok();
+        assert!(ok_result.is_ok());
+        assert_eq!(ok_result.status_code, 0);
+        assert!(ok_result.error_message.is_null());
 
-        let err_res = FfiResult::err(1, std::ptr::null());
-        assert!(!err_res.is_ok());
-        assert_eq!(err_res.status_code, 1);
+        let err_result = FfiResult::err(1, std::ptr::null());
+        assert!(!err_result.is_ok());
+        assert_eq!(err_result.status_code, 1);
     }
 }

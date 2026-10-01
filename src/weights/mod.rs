@@ -1,11 +1,14 @@
 //! Weight loader and mmap model parser module.
 
-/// Weight loader stub.
-#[derive(Default)]
+/// Weight loader stub for safetensors / GGUF model files.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WeightLoader;
 
 impl WeightLoader {
-    pub fn new() -> Self {
+    /// Creates a new [`WeightLoader`] instance.
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }
+

@@ -7,19 +7,19 @@ fn test_rust_to_mojo_ffi_smoke() {
     let output_buf = RawMemoryBuffer::allocate(1024, 64).expect("Alloc failed");
 
     let in_tensor = MojoTensorBuffer {
-        data_ptr: input_buf.as_mut_ptr() as *mut _,
+        data_ptr: input_buf.as_mut_ptr().cast(),
         num_elements: 256,
         element_size_bytes: 4,
         dtype: 0,
     };
     let mut out_tensor = MojoTensorBuffer {
-        data_ptr: output_buf.as_mut_ptr() as *mut _,
+        data_ptr: output_buf.as_mut_ptr().cast(),
         num_elements: 256,
         element_size_bytes: 4,
         dtype: 0,
     };
 
-    // Call dynamic FFI method
+    // SAFETY: Buffers are allocated with correct size and alignment.
     let kernel_result =
         unsafe { gazellm::ffi::bridge::mojo_execute_kernel(&in_tensor, &mut out_tensor) };
     assert_eq!(kernel_result.status_code, 0);
@@ -31,13 +31,13 @@ fn test_rust_to_mojo_safe_bridge_smoke() {
     let output_buf = RawMemoryBuffer::allocate(1024, 64).expect("Alloc failed");
 
     let in_tensor = MojoTensorBuffer {
-        data_ptr: input_buf.as_mut_ptr() as *mut _,
+        data_ptr: input_buf.as_mut_ptr().cast(),
         num_elements: 256,
         element_size_bytes: 4,
         dtype: 0,
     };
     let mut out_tensor = MojoTensorBuffer {
-        data_ptr: output_buf.as_mut_ptr() as *mut _,
+        data_ptr: output_buf.as_mut_ptr().cast(),
         num_elements: 256,
         element_size_bytes: 4,
         dtype: 0,
@@ -46,3 +46,4 @@ fn test_rust_to_mojo_safe_bridge_smoke() {
     let bridge_result = gazellm::ffi::bridge::safe_mojo_execute(&in_tensor, &mut out_tensor);
     assert!(bridge_result.is_ok());
 }
+

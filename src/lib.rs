@@ -1,6 +1,10 @@
 //! gazeLLM Core-Engine Library
 //!
-//! zero-Python high-throughput LLM serving infrastructure
+//! Zero-Python high-throughput LLM serving infrastructure.
+
+#![warn(missing_docs)]
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
+#![allow(clippy::module_name_repetitions)]
 
 pub mod config;
 pub mod ffi;
@@ -10,7 +14,8 @@ pub mod scheduler;
 pub mod weights;
 
 /// Returns the engine version string.
-pub fn engine_version() -> &'static str {
+#[must_use]
+pub const fn engine_version() -> &'static str {
     "0.1.0-alpha"
 }
 
@@ -23,3 +28,4 @@ mod tests {
         assert_eq!(engine_version(), "0.1.0-alpha");
     }
 }
+

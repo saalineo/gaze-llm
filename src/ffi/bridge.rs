@@ -1,7 +1,33 @@
+//! Safe Rust wrapper and C-ABI bridge for Mojo kernel execution.
+
 use crate::ffi::types::{FfiResult, MojoTensorBuffer};
 use std::ffi::CStr;
 
+/// Errors arising from FFI bridge execution.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum FfiBridgeError {
+    /// Kernel returned a non-zero exit status with an error message.
+    #[error("mojo kernel execution failed with status {status_code}: {message}")]
+    KernelFailed {
+        /// Non-zero status code returned by kernel.
+        status_code: i32,
+        /// Description of the error.
+        message: String,
+    },
+    /// Kernel returned a non-zero exit status without an error message.
+    #[error("mojo kernel execution failed with unknown error (status {status_code})")]
+    Unknown {
+        /// Non-zero status code returned by kernel.
+        status_code: i32,
+    },
+}
+
 extern "C" {
+    /// Raw C-ABI symbol for executing a Mojo compute kernel.
+    ///
+    /// # Safety
+    /// Pointers `input` and `output` must be valid, non-null, aligned, and point to
+    /// properly initialized [`MojoTensorBuffer`] structures.
     pub fn mojo_execute_kernel(
         input: *const MojoTensorBuffer,
         output: *mut MojoTensorBuffer,
@@ -9,22 +35,31 @@ extern "C" {
 }
 
 /// Executes a Mojo compute kernel across the C-ABI FFI boundary.
+///
+/// # Errors
+/// Returns [`FfiBridgeError::KernelFailed`] if the Mojo kernel returns a non-zero status code
+/// with an error message, or [`FfiBridgeError::Unknown`] if no message is provided.
 pub fn safe_mojo_execute(
     input: &MojoTensorBuffer,
     output: &mut MojoTensorBuffer,
-) -> Result<(), String> {
-    // SAFETY: Coercing valid Rust references to raw pointers for the C-ABI call.
+) -> Result<(), FfiBridgeError> {
+    // SAFETY: We pass valid references converted to pointers that satisfy Mojo C-ABI layout.
     let kernel_result = unsafe { mojo_execute_kernel(input, output) };
     if kernel_result.is_ok() {
         return Ok(());
     }
 
-    if !kernel_result.error_message.is_null() {
-        // SAFETY: Error pointer is non-null and points to a valid null-terminated C string.
-        let msg = unsafe { CStr::from_ptr(kernel_result.error_message) };
-        Err(msg.to_string_lossy().into_owned())
+    if kernel_result.error_message.is_null() {
+        Err(FfiBridgeError::Unknown {
+            status_code: kernel_result.status_code,
+        })
     } else {
-        Err("Unknown Mojo execution error".to_string())
+        // SAFETY: `kernel_result.error_message` is non-null and points to a valid null-terminated C string.
+        let msg = unsafe { CStr::from_ptr(kernel_result.error_message) };
+        Err(FfiBridgeError::KernelFailed {
+            status_code: kernel_result.status_code,
+            message: msg.to_string_lossy().into_owned(),
+        })
     }
 }
 
@@ -48,7 +83,7 @@ mod tests {
             return FfiResult::err(1, c"Null buffer pointer".as_ptr());
         }
 
-        let status = MOCK_STATUS.with(|s| s.get());
+        let status = MOCK_STATUS.with(Cell::get);
         if status == 0 {
             FfiResult::ok()
         } else {
@@ -90,9 +125,13 @@ mod tests {
         set_mock_behavior(42, Some("CUDA out of memory in Mojo kernel"));
         let input = dummy_buffer();
         let mut output = dummy_buffer();
+        let err = safe_mojo_execute(&input, &mut output).unwrap_err();
         assert_eq!(
-            safe_mojo_execute(&input, &mut output).unwrap_err(),
-            "CUDA out of memory in Mojo kernel"
+            err,
+            FfiBridgeError::KernelFailed {
+                status_code: 42,
+                message: "CUDA out of memory in Mojo kernel".to_string(),
+            }
         );
     }
 
@@ -101,9 +140,7 @@ mod tests {
         set_mock_behavior(-1, None);
         let input = dummy_buffer();
         let mut output = dummy_buffer();
-        assert_eq!(
-            safe_mojo_execute(&input, &mut output).unwrap_err(),
-            "Unknown Mojo execution error"
-        );
+        let err = safe_mojo_execute(&input, &mut output).unwrap_err();
+        assert_eq!(err, FfiBridgeError::Unknown { status_code: -1 });
     }
 }

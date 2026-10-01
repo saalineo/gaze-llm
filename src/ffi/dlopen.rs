@@ -1,31 +1,77 @@
 //! Dynamic library loader for runtime hot-swapping of Mojo compute kernels.
 
+use crate::ffi::bridge::FfiBridgeError;
 use crate::ffi::types::{FfiResult, MojoTensorBuffer};
 use libloading::{Library, Symbol};
 use std::ffi::CStr;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Type alias for the C-ABI Mojo kernel entry point function pointer.
 pub type MojoKernelFn =
     unsafe extern "C" fn(*const MojoTensorBuffer, *mut MojoTensorBuffer) -> FfiResult;
+
+/// Errors arising from dynamic loading of Mojo shared libraries.
+#[derive(Debug, thiserror::Error)]
+pub enum MojoLibraryError {
+    /// Failure loading shared library from disk.
+    #[error("failed to load dynamic library at '{path}': {source}")]
+    Load {
+        /// File path of the shared library.
+        path: String,
+        /// Underlying libloading error.
+        #[source]
+        source: libloading::Error,
+    },
+    /// Failure resolving symbol in shared library.
+    #[error("failed to resolve kernel symbol 'mojo_execute_kernel': {source}")]
+    SymbolNotFound {
+        /// Underlying libloading error.
+        #[source]
+        source: libloading::Error,
+    },
+}
 
 /// RAII wrapper managing the lifecycle and dynamic symbol table of a compiled Mojo shared object.
 pub struct MojoLibrary {
     _lib: Library,
+    /// Function symbol pointer for `mojo_execute_kernel`.
     pub execute_kernel: Symbol<'static, MojoKernelFn>,
 }
+
+impl std::fmt::Debug for MojoLibrary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MojoLibrary")
+            .finish_non_exhaustive()
+    }
+}
+
 
 impl MojoLibrary {
     /// Dynamically loads a Mojo shared object (`.so` / `.dylib`) from the given path
     /// and resolves the entry kernel symbol `mojo_execute_kernel`.
-    pub fn load<P: AsRef<Path>>(
-        path: P,
-    ) -> Result<Arc<Self>, Box<dyn std::error::Error + Send + Sync>> {
+    ///
+    /// # Errors
+    /// Returns [`MojoLibraryError::Load`] if the library cannot be opened, or
+    /// [`MojoLibraryError::SymbolNotFound`] if `mojo_execute_kernel` is missing.
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, MojoLibraryError> {
         let path_ref = path.as_ref();
+        let path_str = path_ref.to_string_lossy().to_string();
+
         // SAFETY: Loading external shared objects assumes standard C-ABI calling conventions
         // and matching `MojoTensorBuffer` / `FfiResult` layouts.
-        let lib = unsafe { Library::new(path_ref)? };
-        let kernel_symbol: Symbol<MojoKernelFn> = unsafe { lib.get(b"mojo_execute_kernel\0")? };
+        let lib = unsafe {
+            Library::new(path_ref).map_err(|source| MojoLibraryError::Load {
+                path: path_str,
+                source,
+            })?
+        };
+
+        // SAFETY: Symbol name is null-terminated and matches expected C ABI signature.
+        let kernel_symbol: Symbol<MojoKernelFn> = unsafe {
+            lib.get(b"mojo_execute_kernel\0")
+                .map_err(|source| MojoLibraryError::SymbolNotFound { source })?
+        };
 
         // SAFETY: The symbol pointer remains valid for the lifetime of `_lib`,
         // which is co-owned inside the returned `MojoLibrary` struct.
@@ -39,21 +85,32 @@ impl MojoLibrary {
     }
 
     /// Safely invokes the dynamically loaded `mojo_execute_kernel` symbol.
+    ///
+    /// # Errors
+    /// Returns [`FfiBridgeError::KernelFailed`] if the Mojo kernel returns a non-zero status code
+    /// with an error message, or [`FfiBridgeError::Unknown`] if no message is provided.
     pub fn execute(
         &self,
         input: &MojoTensorBuffer,
         output: &mut MojoTensorBuffer,
-    ) -> Result<(), String> {
+    ) -> Result<(), FfiBridgeError> {
+        // SAFETY: We pass valid references converted to pointers that satisfy Mojo C-ABI layout.
         let kernel_result = unsafe { (self.execute_kernel)(input, output) };
         if kernel_result.is_ok() {
             return Ok(());
         }
 
-        if !kernel_result.error_message.is_null() {
-            let error_msg = unsafe { CStr::from_ptr(kernel_result.error_message) };
-            Err(error_msg.to_string_lossy().into_owned())
+        if kernel_result.error_message.is_null() {
+            Err(FfiBridgeError::Unknown {
+                status_code: kernel_result.status_code,
+            })
         } else {
-            Err("Unknown Mojo execution error".to_string())
+            // SAFETY: `kernel_result.error_message` is non-null and points to a valid null-terminated C string.
+            let error_msg = unsafe { CStr::from_ptr(kernel_result.error_message) };
+            Err(FfiBridgeError::KernelFailed {
+                status_code: kernel_result.status_code,
+                message: error_msg.to_string_lossy().into_owned(),
+            })
         }
     }
 }
@@ -87,21 +144,24 @@ mod tests {
         let output_buf = RawMemoryBuffer::allocate(1024, 64).expect("Alloc failed");
 
         let in_tensor = MojoTensorBuffer {
-            data_ptr: input_buf.as_mut_ptr() as *mut _,
+            data_ptr: input_buf.as_mut_ptr().cast(),
             num_elements: 256,
             element_size_bytes: 4,
             dtype: 0,
         };
         let mut out_tensor = MojoTensorBuffer {
-            data_ptr: output_buf.as_mut_ptr() as *mut _,
+            data_ptr: output_buf.as_mut_ptr().cast(),
             num_elements: 256,
             element_size_bytes: 4,
             dtype: 0,
         };
 
-        let kernel_status = unsafe { (mojo_lib.execute_kernel)(&in_tensor, &mut out_tensor) };
+        // SAFETY: Valid buffer layout and loaded library.
+        let kernel_status =
+            unsafe { (mojo_lib.execute_kernel)(&raw const in_tensor, &raw mut out_tensor) };
         assert_eq!(kernel_status.status_code, 0);
     }
+
 
     #[test]
     fn test_dlopen_execute_method() {
@@ -115,13 +175,13 @@ mod tests {
         let output_buf = RawMemoryBuffer::allocate(512, 64).expect("Alloc failed");
 
         let in_tensor = MojoTensorBuffer {
-            data_ptr: input_buf.as_mut_ptr() as *mut _,
+            data_ptr: input_buf.as_mut_ptr().cast(),
             num_elements: 128,
             element_size_bytes: 4,
             dtype: 0,
         };
         let mut out_tensor = MojoTensorBuffer {
-            data_ptr: output_buf.as_mut_ptr() as *mut _,
+            data_ptr: output_buf.as_mut_ptr().cast(),
             num_elements: 128,
             element_size_bytes: 4,
             dtype: 0,
@@ -135,6 +195,7 @@ mod tests {
     fn test_dlopen_nonexistent_path_fails() {
         let load_result = MojoLibrary::load("target/nonexistent_lib_invalid.so");
         assert!(load_result.is_err());
+        assert!(matches!(load_result.unwrap_err(), MojoLibraryError::Load { .. }));
     }
 
     #[test]
@@ -144,9 +205,11 @@ mod tests {
             "/usr/lib/libc.so.6",
             "/lib/x86_64-linux-gnu/libc.so.6",
         ];
-        for candidate in &libc_candidates {
-            if Path::new(candidate).exists() || *candidate == "libc.so.6" {
+        for candidate in libc_candidates {
+            if Path::new(candidate).exists() || candidate == "libc.so.6" {
+                // SAFETY: Testing loading system libc.
                 if let Ok(lib) = unsafe { Library::new(candidate) } {
+                    // SAFETY: Testing missing symbol lookup.
                     let missing_sym: Result<Symbol<MojoKernelFn>, _> =
                         unsafe { lib.get(b"mojo_execute_kernel\0") };
                     assert!(missing_sym.is_err());
@@ -173,13 +236,13 @@ mod tests {
                 let output_buf = RawMemoryBuffer::allocate(256, 64).expect("Alloc failed");
 
                 let in_tensor = MojoTensorBuffer {
-                    data_ptr: input_buf.as_mut_ptr() as *mut _,
+                    data_ptr: input_buf.as_mut_ptr().cast(),
                     num_elements: 64,
                     element_size_bytes: 4,
                     dtype: 0,
                 };
                 let mut out_tensor = MojoTensorBuffer {
-                    data_ptr: output_buf.as_mut_ptr() as *mut _,
+                    data_ptr: output_buf.as_mut_ptr().cast(),
                     num_elements: 64,
                     element_size_bytes: 4,
                     dtype: 0,
@@ -195,3 +258,4 @@ mod tests {
         }
     }
 }
+

@@ -6,15 +6,19 @@ use std::process;
 use tracing::{error, info};
 
 fn parse_config_path() -> String {
-    let args: Vec<String> = env::args().collect();
-    args.windows(2)
-        .find(|pair| pair[0] == "--config")
-        .map(|pair| pair[1].clone())
-        .unwrap_or_else(|| "config/engine_config.json".to_string())
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--config" {
+            if let Some(val) = args.next() {
+                return val;
+            }
+        }
+    }
+    "config/engine_config.json".to_string()
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt::init();
     info!("Starting gazeLLM Engine v{}", engine_version());
 
@@ -37,7 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.host, config.port, config.max_batch_size, config.block_size
     );
 
-    start_http_server(config).await?;
+    start_http_server(&config).await?;
 
     Ok(())
 }
+

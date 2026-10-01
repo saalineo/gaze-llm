@@ -1,5 +1,6 @@
 //! gRPC protocol handler and streaming inference service implementation.
 
+#[allow(clippy::all, clippy::pedantic, clippy::nursery, missing_docs)]
 pub mod gaze_v1 {
     tonic::include_proto!("gaze.v1");
 }
@@ -12,7 +13,7 @@ use tokio_stream::Stream;
 use tonic::{Request, Response, Status};
 
 /// High-throughput streaming gRPC inference service implementation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct EngineInferenceService;
 
 #[tonic::async_trait]
@@ -112,6 +113,8 @@ mod tests {
 
     #[test]
     fn test_serialization_benchmark() {
+        const ITERATIONS: u128 = 10_000;
+
         let request = GenerateRequest {
             request_id: "bench-req-999".to_string(),
             prompt: "Benchmark prompt string for sub-microsecond serialization test".to_string(),
@@ -121,11 +124,11 @@ mod tests {
             top_k: 50,
         };
 
-        let iterations = 10_000;
         let start_time = Instant::now();
         let mut total_bytes = 0;
 
-        for _ in 0..iterations {
+
+        for _ in 0..ITERATIONS {
             let mut buffer = Vec::with_capacity(128);
             request.encode(&mut buffer).expect("Encode failed");
             total_bytes += buffer.len();
@@ -133,16 +136,16 @@ mod tests {
         }
 
         let elapsed = start_time.elapsed();
-        let nanos_per_op = elapsed.as_nanos() / iterations as u128;
+        let nanos_per_op = elapsed.as_nanos() / ITERATIONS;
         println!(
-            "Protobuf roundtrip serialization: {} iterations in {:?}, avg {} ns/op, total {} bytes",
-            iterations, elapsed, nanos_per_op, total_bytes
+            "Protobuf roundtrip serialization: {ITERATIONS} iterations in {elapsed:?}, avg {nanos_per_op} ns/op, total {total_bytes} bytes"
         );
 
         assert!(
             nanos_per_op < 10_000,
-            "Serialization took too long: {} ns/op",
-            nanos_per_op
+            "Serialization took too long: {nanos_per_op} ns/op"
         );
     }
 }
+
+

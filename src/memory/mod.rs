@@ -2,14 +2,17 @@
 
 pub mod raw_buffer;
 
-pub use raw_buffer::RawMemoryBuffer;
+pub use raw_buffer::{AllocationError, RawMemoryBuffer};
 
 /// KV-cache allocator stub.
-#[derive(Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct MemoryManager;
 
 impl MemoryManager {
-    pub fn new() -> Self {
+    /// Creates a new [`MemoryManager`] instance.
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }
+

@@ -7,13 +7,22 @@ use axum::{
 };
 use std::net::SocketAddr;
 
+/// Constructs the Axum HTTP router with all engine endpoints configured.
 pub fn create_router() -> Router {
     Router::new()
         .route("/health", get(|| async { "OK" }))
         .route("/v1/completions", post(handle_completion))
 }
 
-pub async fn start_http_server(config: EngineConfig) -> Result<(), Box<dyn std::error::Error>> {
+
+/// Starts the Axum HTTP REST server bound to the address specified in `config`.
+///
+/// # Errors
+/// Returns an error if the host/port address fails to parse, the socket cannot be bound,
+/// or the underlying server fails during execution.
+pub async fn start_http_server(
+    config: &EngineConfig,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = create_router();
 
     let addr: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
@@ -43,16 +52,16 @@ mod tests {
                 Request::builder()
                     .uri("/health")
                     .body(Body::empty())
-                    .expect("Failed to build HTTP request"),
+                    .expect("failed to build HTTP request"),
             )
             .await
-            .expect("Service execution failed");
+            .expect("service execution failed");
 
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
-            .expect("Failed to read response body");
+            .expect("failed to read response body");
         assert_eq!(&body[..], b"OK");
     }
 
@@ -67,16 +76,17 @@ mod tests {
                     .uri("/v1/completions")
                     .header("content-type", "application/json")
                     .body(Body::from(r#"{"prompt": "Hello"}"#))
-                    .expect("Failed to build HTTP request"),
+                    .expect("failed to build HTTP request"),
             )
             .await
-            .expect("Service execution failed");
+            .expect("service execution failed");
 
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
-            .expect("Failed to read response body");
+            .expect("failed to read response body");
         assert_eq!(&body[..], b"{\"text\": \"stub\", \"tokens\": []}");
     }
 }
+

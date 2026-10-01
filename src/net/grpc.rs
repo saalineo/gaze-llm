@@ -127,7 +127,6 @@ mod tests {
         let start_time = Instant::now();
         let mut total_bytes = 0;
 
-
         for _ in 0..ITERATIONS {
             let mut buffer = Vec::with_capacity(128);
             request.encode(&mut buffer).expect("Encode failed");
@@ -147,5 +146,3 @@ mod tests {
         );
     }
 }
-
-

@@ -22,6 +22,31 @@ pub enum FfiBridgeError {
     },
 }
 
+/// Decodes an [`FfiResult`] into a Rust [`Result<(), FfiBridgeError>`].
+///
+/// # Errors
+/// Returns [`FfiBridgeError::KernelFailed`] if the status is non-zero with an error message,
+/// or [`FfiBridgeError::Unknown`] if no message is provided.
+#[inline]
+pub fn parse_ffi_result(result: FfiResult) -> Result<(), FfiBridgeError> {
+    if result.is_ok() {
+        return Ok(());
+    }
+
+    if result.error_message.is_null() {
+        Err(FfiBridgeError::Unknown {
+            status_code: result.status_code,
+        })
+    } else {
+        // SAFETY: `result.error_message` is checked to be non-null and is assumed to point to a valid null-terminated C string.
+        let msg = unsafe { CStr::from_ptr(result.error_message) };
+        Err(FfiBridgeError::KernelFailed {
+            status_code: result.status_code,
+            message: msg.to_string_lossy().into_owned(),
+        })
+    }
+}
+
 extern "C" {
     /// Raw C-ABI symbol for executing a Mojo compute kernel.
     ///
@@ -39,28 +64,14 @@ extern "C" {
 /// # Errors
 /// Returns [`FfiBridgeError::KernelFailed`] if the Mojo kernel returns a non-zero status code
 /// with an error message, or [`FfiBridgeError::Unknown`] if no message is provided.
+#[inline]
 pub fn safe_mojo_execute(
     input: &MojoTensorBuffer,
     output: &mut MojoTensorBuffer,
 ) -> Result<(), FfiBridgeError> {
     // SAFETY: We pass valid references converted to pointers that satisfy Mojo C-ABI layout.
     let kernel_result = unsafe { mojo_execute_kernel(input, output) };
-    if kernel_result.is_ok() {
-        return Ok(());
-    }
-
-    if kernel_result.error_message.is_null() {
-        Err(FfiBridgeError::Unknown {
-            status_code: kernel_result.status_code,
-        })
-    } else {
-        // SAFETY: `kernel_result.error_message` is non-null and points to a valid null-terminated C string.
-        let msg = unsafe { CStr::from_ptr(kernel_result.error_message) };
-        Err(FfiBridgeError::KernelFailed {
-            status_code: kernel_result.status_code,
-            message: msg.to_string_lossy().into_owned(),
-        })
-    }
+    parse_ffi_result(kernel_result)
 }
 
 #[cfg(test)]

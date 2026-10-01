@@ -4,7 +4,6 @@
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Scheduler;
 
-
 impl Scheduler {
     /// Creates a new [`Scheduler`] instance.
     #[must_use]
@@ -12,4 +11,3 @@ impl Scheduler {
         Self
     }
 }
-

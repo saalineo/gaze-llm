@@ -1,9 +1,8 @@
 //! Dynamic library loader for runtime hot-swapping of Mojo compute kernels.
 
-use crate::ffi::bridge::FfiBridgeError;
+use crate::ffi::bridge::{parse_ffi_result, FfiBridgeError};
 use crate::ffi::types::{FfiResult, MojoTensorBuffer};
 use libloading::{Library, Symbol};
-use std::ffi::CStr;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -41,11 +40,9 @@ pub struct MojoLibrary {
 
 impl std::fmt::Debug for MojoLibrary {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MojoLibrary")
-            .finish_non_exhaustive()
+        f.debug_struct("MojoLibrary").finish_non_exhaustive()
     }
 }
-
 
 impl MojoLibrary {
     /// Dynamically loads a Mojo shared object (`.so` / `.dylib`) from the given path
@@ -89,6 +86,7 @@ impl MojoLibrary {
     /// # Errors
     /// Returns [`FfiBridgeError::KernelFailed`] if the Mojo kernel returns a non-zero status code
     /// with an error message, or [`FfiBridgeError::Unknown`] if no message is provided.
+    #[inline]
     pub fn execute(
         &self,
         input: &MojoTensorBuffer,
@@ -96,22 +94,7 @@ impl MojoLibrary {
     ) -> Result<(), FfiBridgeError> {
         // SAFETY: We pass valid references converted to pointers that satisfy Mojo C-ABI layout.
         let kernel_result = unsafe { (self.execute_kernel)(input, output) };
-        if kernel_result.is_ok() {
-            return Ok(());
-        }
-
-        if kernel_result.error_message.is_null() {
-            Err(FfiBridgeError::Unknown {
-                status_code: kernel_result.status_code,
-            })
-        } else {
-            // SAFETY: `kernel_result.error_message` is non-null and points to a valid null-terminated C string.
-            let error_msg = unsafe { CStr::from_ptr(kernel_result.error_message) };
-            Err(FfiBridgeError::KernelFailed {
-                status_code: kernel_result.status_code,
-                message: error_msg.to_string_lossy().into_owned(),
-            })
-        }
+        parse_ffi_result(kernel_result)
     }
 }
 
@@ -162,7 +145,6 @@ mod tests {
         assert_eq!(kernel_status.status_code, 0);
     }
 
-
     #[test]
     fn test_dlopen_execute_method() {
         let lib_path = get_mojo_lib_path();
@@ -195,7 +177,10 @@ mod tests {
     fn test_dlopen_nonexistent_path_fails() {
         let load_result = MojoLibrary::load("target/nonexistent_lib_invalid.so");
         assert!(load_result.is_err());
-        assert!(matches!(load_result.unwrap_err(), MojoLibraryError::Load { .. }));
+        assert!(matches!(
+            load_result.unwrap_err(),
+            MojoLibraryError::Load { .. }
+        ));
     }
 
     #[test]
@@ -258,4 +243,3 @@ mod tests {
         }
     }
 }
-

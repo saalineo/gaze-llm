@@ -94,6 +94,22 @@ impl FastTokenizer {
         Ok(encoding.get_ids().to_vec())
     }
 
+    /// Encodes a batch of text prompts into vectors of token IDs.
+    ///
+    /// # Errors
+    /// Returns [`TokenizerError::Encode`] if any tokenization fails.
+    pub fn encode_batch(&self, texts: &[&str]) -> Result<Vec<Vec<u32>>, TokenizerError> {
+        let encodings = self
+            .inner
+            .encode_batch(texts.to_vec(), false)
+            .map_err(|err| TokenizerError::Encode(err.to_string()))?;
+
+        Ok(encodings
+            .into_iter()
+            .map(|e| e.get_ids().to_vec())
+            .collect())
+    }
+
     /// Decodes a slice of token IDs back into a reconstructed text string.
     ///
     /// # Errors
@@ -107,20 +123,42 @@ impl FastTokenizer {
         Ok(text)
     }
 
+    /// Decodes a batch of token ID sequences into reconstructed text strings.
+    ///
+    /// # Errors
+    /// Returns [`TokenizerError::Decode`] if decoding fails.
+    pub fn decode_batch(&self, sequences: &[&[u32]]) -> Result<Vec<String>, TokenizerError> {
+        let mut results = Vec::with_capacity(sequences.len());
+        for seq in sequences {
+            results.push(self.decode(seq)?);
+        }
+        Ok(results)
+    }
+
     /// Returns the total vocabulary size of the tokenizer.
     #[must_use]
+    #[inline]
     pub fn vocab_size(&self) -> usize {
         self.inner.get_vocab_size(true)
     }
 
+    /// Returns `true` if the vocabulary is empty.
+    #[must_use]
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.vocab_size() == 0
+    }
+
     /// Returns a shared reference to the underlying [`Tokenizer`].
     #[must_use]
+    #[inline]
     pub fn inner(&self) -> &Tokenizer {
         &self.inner
     }
 
     /// Returns an `Arc` clone of the underlying [`Tokenizer`].
     #[must_use]
+    #[inline]
     pub fn inner_arc(&self) -> Arc<Tokenizer> {
         Arc::clone(&self.inner)
     }
@@ -168,13 +206,13 @@ mod tests {
         FastTokenizer::from_tokenizer(tokenizer)
     }
 
-
-
     #[test]
     fn test_encode_and_decode_roundtrip() {
         let tokenizer = build_test_tokenizer();
 
-        let token_ids = tokenizer.encode("Hello world !").expect("encoding succeeds");
+        let token_ids = tokenizer
+            .encode("Hello world !")
+            .expect("encoding succeeds");
         assert_eq!(token_ids, vec![3, 4, 5]);
 
         let decoded = tokenizer.decode(&token_ids).expect("decoding succeeds");
@@ -182,9 +220,25 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_and_decode_batch() {
+        let tokenizer = build_test_tokenizer();
+
+        let batch_ids = tokenizer
+            .encode_batch(&["Hello world", "!"])
+            .expect("batch encoding succeeds");
+        assert_eq!(batch_ids, vec![vec![3, 4], vec![5]]);
+
+        let decoded = tokenizer
+            .decode_batch(&[&batch_ids[0], &batch_ids[1]])
+            .expect("batch decoding succeeds");
+        assert_eq!(decoded, vec!["Hello world", "!"]);
+    }
+
+    #[test]
     fn test_vocab_size() {
         let tokenizer = build_test_tokenizer();
         assert_eq!(tokenizer.vocab_size(), 6);
+        assert!(!tokenizer.is_empty());
     }
 
     #[test]
@@ -195,7 +249,6 @@ mod tests {
         assert!(matches!(err, TokenizerError::Load { .. }));
         assert!(err.to_string().contains("failed to load tokenizer"));
     }
-
 
     #[test]
     fn test_from_file_valid_temp() {
@@ -211,6 +264,7 @@ mod tests {
         let fast_tok =
             FastTokenizer::from_file(&file_path).expect("loading from temp file succeeds");
         assert_eq!(fast_tok.vocab_size(), 0);
+        assert!(fast_tok.is_empty());
 
         let _ = fs::remove_file(file_path);
     }

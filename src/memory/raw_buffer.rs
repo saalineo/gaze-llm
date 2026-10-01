@@ -1,11 +1,11 @@
 //! Raw memory buffer allocation and lifecycle management.
 
-use std::alloc::{alloc, dealloc, Layout, LayoutError};
+use crate::ffi::types::MojoTensorBuffer;
+use std::alloc::{alloc, alloc_zeroed, dealloc, Layout, LayoutError};
 use std::fmt;
 use std::ptr::NonNull;
 
-
-/// Errors that can occur when allocating a [`RawMemoryBuffer`].
+/// Errors that can occur when allocating or indexing a [`RawMemoryBuffer`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AllocationError {
     /// Attempted to allocate a zero-byte buffer.
@@ -17,6 +17,14 @@ pub enum AllocationError {
     /// The global system allocator returned a null pointer.
     #[error("system allocator failed to allocate memory")]
     OutOfMemory,
+    /// Tensor dimensions exceed allocated buffer capacity.
+    #[error("buffer capacity ({capacity} bytes) insufficient for tensor ({required} bytes)")]
+    BufferOverflow {
+        /// Available buffer capacity in bytes.
+        capacity: usize,
+        /// Total bytes required by tensor.
+        required: usize,
+    },
 }
 
 /// RAII-managed aligned raw memory buffer for zero-overhead cross-runtime (Mojo/CUDA) FFI execution.
@@ -45,6 +53,25 @@ impl RawMemoryBuffer {
         Ok(Self { ptr, layout })
     }
 
+    /// Allocates a zero-initialized memory buffer of `size_bytes` aligned to `align_bytes`.
+    ///
+    /// # Errors
+    /// Returns [`AllocationError::ZeroSize`] if `size_bytes` is 0, [`AllocationError::InvalidLayout`]
+    /// if `align_bytes` is not a valid power of two, or [`AllocationError::OutOfMemory`] if
+    /// the allocator fails.
+    pub fn zeroed(size_bytes: usize, align_bytes: usize) -> Result<Self, AllocationError> {
+        if size_bytes == 0 {
+            return Err(AllocationError::ZeroSize);
+        }
+        let layout = Layout::from_size_align(size_bytes, align_bytes)?;
+
+        // SAFETY: `layout` has non-zero size, satisfying the allocator contract.
+        let raw_ptr = unsafe { alloc_zeroed(layout) };
+        let ptr = NonNull::new(raw_ptr).ok_or(AllocationError::OutOfMemory)?;
+
+        Ok(Self { ptr, layout })
+    }
+
     /// Returns a raw mutable pointer to the underlying buffer.
     #[must_use]
     #[inline]
@@ -59,10 +86,24 @@ impl RawMemoryBuffer {
         self.ptr.as_ptr()
     }
 
+    /// Returns the [`NonNull`] pointer to the underlying buffer.
+    #[must_use]
+    #[inline]
+    pub const fn non_null_ptr(&self) -> NonNull<u8> {
+        self.ptr
+    }
+
     /// Returns the buffer allocation size in bytes.
     #[must_use]
     #[inline]
     pub const fn size(&self) -> usize {
+        self.layout.size()
+    }
+
+    /// Alias for [`RawMemoryBuffer::size`]. Returns buffer length in bytes.
+    #[must_use]
+    #[inline]
+    pub const fn len(&self) -> usize {
         self.layout.size()
     }
 
@@ -73,11 +114,59 @@ impl RawMemoryBuffer {
         self.layout.align()
     }
 
+    /// Returns the memory [`Layout`] used for this allocation.
+    #[must_use]
+    #[inline]
+    pub const fn layout(&self) -> Layout {
+        self.layout
+    }
+
     /// Returns `true` if the buffer has a size of 0 bytes.
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
         self.layout.size() == 0
+    }
+
+    /// Fills the entire buffer with the specified byte value.
+    #[inline]
+    pub const fn fill(&mut self, val: u8) {
+        // SAFETY: `self.ptr` is non-null and valid for `self.layout.size()` bytes of write access.
+        unsafe {
+            std::ptr::write_bytes(self.ptr.as_ptr(), val, self.layout.size());
+        }
+    }
+
+    /// Zeroes out the entire buffer.
+    #[inline]
+    pub const fn fill_zero(&mut self) {
+        self.fill(0);
+    }
+
+    /// Constructs a [`MojoTensorBuffer`] descriptor pointing into this buffer.
+    ///
+    /// # Errors
+    /// Returns [`AllocationError::BufferOverflow`] if `num_elements * element_size_bytes` exceeds
+    /// the buffer size.
+    pub const fn as_mojo_tensor(
+        &mut self,
+        num_elements: usize,
+        element_size_bytes: usize,
+        dtype: i32,
+    ) -> Result<MojoTensorBuffer, AllocationError> {
+        let required = num_elements.saturating_mul(element_size_bytes);
+        if required > self.layout.size() {
+            return Err(AllocationError::BufferOverflow {
+                capacity: self.layout.size(),
+                required,
+            });
+        }
+        Ok(MojoTensorBuffer::new(
+            self.as_mut_ptr().cast(),
+            num_elements,
+            element_size_bytes,
+            dtype,
+        ))
     }
 
     /// Returns an immutable slice view of the buffer memory.
@@ -104,12 +193,11 @@ impl RawMemoryBuffer {
         // SAFETY: `self.ptr` is non-null and valid for writes of `self.layout.size()` bytes.
         unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.layout.size()) }
     }
-
 }
 
 impl Drop for RawMemoryBuffer {
     fn drop(&mut self) {
-        // SAFETY: `self.ptr` was allocated with `self.layout` via `std::alloc::alloc`.
+        // SAFETY: `self.ptr` was allocated with `self.layout` via `std::alloc::alloc` or `alloc_zeroed`.
         unsafe {
             dealloc(self.ptr.as_ptr(), self.layout);
         }
@@ -145,19 +233,15 @@ mod tests {
     fn test_allocate_and_access() {
         let size = 1024;
         let align = 64;
-        let mut buffer =
-            RawMemoryBuffer::allocate(size, align).expect("allocation should succeed");
+        let mut buffer = RawMemoryBuffer::allocate(size, align).expect("allocation should succeed");
 
         assert_eq!(buffer.size(), size);
+        assert_eq!(buffer.len(), size);
         assert_eq!(buffer.align(), align);
         assert!(!buffer.is_empty());
         let ptr = buffer.as_mut_ptr();
         assert!(!ptr.is_null());
-        assert_eq!(
-            (ptr as usize) % align,
-            0,
-            "pointer must be 64-byte aligned"
-        );
+        assert_eq!((ptr as usize) % align, 0, "pointer must be 64-byte aligned");
 
         // SAFETY: Testing raw pointer writes to allocated memory.
         unsafe {
@@ -175,9 +259,51 @@ mod tests {
     }
 
     #[test]
+    fn test_zeroed_and_fill() {
+        let mut buf = RawMemoryBuffer::zeroed(128, 16).expect("zeroed alloc");
+        // SAFETY: Zero-initialized buffer is safe to read.
+        unsafe {
+            assert_eq!(buf.as_slice()[0], 0);
+            assert_eq!(buf.as_slice()[127], 0);
+        }
+
+        buf.fill(0xEE);
+        // SAFETY: Filled buffer is safe to read.
+        unsafe {
+            assert_eq!(buf.as_slice()[0], 0xEE);
+            assert_eq!(buf.as_slice()[127], 0xEE);
+        }
+
+        buf.fill_zero();
+        // SAFETY: Zeroed buffer is safe to read.
+        unsafe {
+            assert_eq!(buf.as_slice()[0], 0);
+            assert_eq!(buf.as_slice()[127], 0);
+        }
+    }
+
+    #[test]
+    fn test_as_mojo_tensor() {
+        let mut buf = RawMemoryBuffer::allocate(512, 64).expect("alloc");
+        let tensor = buf.as_mojo_tensor(128, 4, 0).expect("tensor conversion");
+        assert_eq!(tensor.num_elements, 128);
+        assert_eq!(tensor.element_size_bytes, 4);
+        assert_eq!(tensor.total_bytes(), 512);
+
+        let overflow_err = buf.as_mojo_tensor(200, 4, 0).unwrap_err();
+        assert!(matches!(
+            overflow_err,
+            AllocationError::BufferOverflow { .. }
+        ));
+    }
+
+    #[test]
     fn test_allocate_zero_size_fails() {
         let err = RawMemoryBuffer::allocate(0, 64).expect_err("0-byte allocation must fail");
         assert_eq!(err, AllocationError::ZeroSize);
+
+        let err_zeroed = RawMemoryBuffer::zeroed(0, 64).expect_err("0-byte zeroed alloc must fail");
+        assert_eq!(err_zeroed, AllocationError::ZeroSize);
     }
 
     #[test]
@@ -261,4 +387,3 @@ mod tests {
         assert!(debug_str.contains("align: 16"));
     }
 }
-

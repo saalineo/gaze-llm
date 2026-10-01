@@ -46,4 +46,3 @@ fn test_rust_to_mojo_safe_bridge_smoke() {
     let bridge_result = gazellm::ffi::bridge::safe_mojo_execute(&in_tensor, &mut out_tensor);
     assert!(bridge_result.is_ok());
 }
-

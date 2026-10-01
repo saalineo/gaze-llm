@@ -14,7 +14,6 @@ pub mod scheduler;
 pub mod tokenizer;
 pub mod weights;
 
-
 /// Returns the engine version string.
 #[must_use]
 pub const fn engine_version() -> &'static str {
@@ -30,4 +29,3 @@ mod tests {
         assert_eq!(engine_version(), "0.1.0-alpha");
     }
 }
-

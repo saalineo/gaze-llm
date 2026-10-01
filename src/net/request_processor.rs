@@ -1,6 +1,7 @@
 //! Inference request validation and processing logic.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Errors encountered during inference request payload validation.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -39,7 +40,35 @@ pub struct InferenceRequest {
     pub top_p: f32,
 }
 
+impl fmt::Display for InferenceRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "InferenceRequest {{ id: '{}', max_tokens: {}, temperature: {:.2}, top_p: {:.2} }}",
+            self.id, self.max_tokens, self.temperature, self.top_p
+        )
+    }
+}
+
 impl InferenceRequest {
+    /// Constructs a new [`InferenceRequest`] with default temperature (0.7) and `top_p` (0.9).
+    #[must_use]
+    pub fn new(id: impl Into<String>, prompt: impl Into<String>, max_tokens: usize) -> Self {
+        Self {
+            id: id.into(),
+            prompt: prompt.into(),
+            max_tokens,
+            temperature: 0.7,
+            top_p: 0.9,
+        }
+    }
+
+    /// Returns a new builder for [`InferenceRequest`].
+    #[must_use]
+    pub fn builder() -> InferenceRequestBuilder {
+        InferenceRequestBuilder::default()
+    }
+
     /// Validates the request fields against engine constraints.
     ///
     /// # Errors
@@ -55,13 +84,72 @@ impl InferenceRequest {
                 max_seq_len,
             });
         }
-        if !(0.0..=2.0).contains(&self.temperature) {
+        if self.temperature.is_nan() || !(0.0..=2.0).contains(&self.temperature) {
             return Err(RequestValidationError::InvalidTemperature(self.temperature));
         }
-        if !(self.top_p > 0.0 && self.top_p <= 1.0) {
+        if self.top_p.is_nan() || !(self.top_p > 0.0 && self.top_p <= 1.0) {
             return Err(RequestValidationError::InvalidTopP(self.top_p));
         }
         Ok(())
+    }
+}
+
+/// Builder for constructing [`InferenceRequest`].
+#[derive(Debug, Default, Clone)]
+pub struct InferenceRequestBuilder {
+    id: Option<String>,
+    prompt: Option<String>,
+    max_tokens: usize,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+}
+
+impl InferenceRequestBuilder {
+    /// Sets the request ID.
+    #[must_use]
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    /// Sets the prompt string.
+    #[must_use]
+    pub fn prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = Some(prompt.into());
+        self
+    }
+
+    /// Sets the maximum new tokens.
+    #[must_use]
+    pub const fn max_tokens(mut self, max_tokens: usize) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
+
+    /// Sets the sampling temperature.
+    #[must_use]
+    pub const fn temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    /// Sets the nucleus sampling `top_p` threshold.
+    #[must_use]
+    pub const fn top_p(mut self, top_p: f32) -> Self {
+        self.top_p = Some(top_p);
+        self
+    }
+
+    /// Builds the [`InferenceRequest`].
+    #[must_use]
+    pub fn build(self) -> InferenceRequest {
+        InferenceRequest {
+            id: self.id.unwrap_or_default(),
+            prompt: self.prompt.unwrap_or_default(),
+            max_tokens: self.max_tokens,
+            temperature: self.temperature.unwrap_or(0.7),
+            top_p: self.top_p.unwrap_or(0.9),
+        }
     }
 }
 
@@ -69,6 +157,7 @@ impl InferenceRequest {
 ///
 /// # Errors
 /// Returns [`RequestValidationError`] if the request parameters fail validation.
+#[inline]
 pub fn validate_request(
     request: &InferenceRequest,
     max_seq_len: usize,
@@ -81,18 +170,37 @@ mod tests {
     use super::*;
 
     fn sample_request() -> InferenceRequest {
-        InferenceRequest {
-            id: "req-1".into(),
-            prompt: "Hello world".into(),
-            max_tokens: 128,
-            temperature: 0.7,
-            top_p: 0.9,
-        }
+        InferenceRequest::new("req-1", "Hello world", 128)
     }
 
     #[test]
     fn test_valid_request() {
         assert!(sample_request().validate(2048).is_ok());
+    }
+
+    #[test]
+    fn test_builder() {
+        let req = InferenceRequest::builder()
+            .id("req-builder")
+            .prompt("Test prompt")
+            .max_tokens(256)
+            .temperature(0.5)
+            .top_p(0.95)
+            .build();
+
+        assert_eq!(req.id, "req-builder");
+        assert_eq!(req.prompt, "Test prompt");
+        assert_eq!(req.max_tokens, 256);
+        assert!((req.temperature - 0.5).abs() < f32::EPSILON);
+        assert!((req.top_p - 0.95).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_display() {
+        let req = sample_request();
+        let s = format!("{req}");
+        assert!(s.contains("req-1"));
+        assert!(s.contains("128"));
     }
 
     #[test]
@@ -147,4 +255,3 @@ mod tests {
         assert_eq!(req, parsed);
     }
 }
-

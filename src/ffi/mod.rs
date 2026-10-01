@@ -12,4 +12,3 @@ pub use types::{dtype, DType, FfiResult, InvalidDTypeError, MojoBlockTable, Mojo
 pub fn init_ffi() {
     tracing::info!("Initializing FFI compute bindings");
 }
-

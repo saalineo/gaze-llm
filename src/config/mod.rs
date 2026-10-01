@@ -1,6 +1,7 @@
 //! Engine configuration management module.
 
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs;
 use std::path::Path;
 
@@ -15,7 +16,6 @@ pub struct EngineConfig {
     pub max_batch_size: usize,
     /// Number of tokens per `PagedAttention` memory block.
     pub block_size: usize,
-
     /// Total number of memory blocks allocated in host RAM.
     pub max_num_blocks: usize,
     /// Total number of memory blocks allocated on GPU VRAM.
@@ -38,7 +38,23 @@ impl Default for EngineConfig {
     }
 }
 
-/// Errors encountered when loading engine configuration.
+impl fmt::Display for EngineConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "EngineConfig {{ host: {}, port: {}, max_batch_size: {}, block_size: {}, max_num_blocks: {}, num_gpu_blocks: {}, mojo_library_path: '{}' }}",
+            self.host,
+            self.port,
+            self.max_batch_size,
+            self.block_size,
+            self.max_num_blocks,
+            self.num_gpu_blocks,
+            self.mojo_library_path
+        )
+    }
+}
+
+/// Errors encountered when loading or validating engine configuration.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     /// I/O failure when reading the configuration file.
@@ -59,14 +75,29 @@ pub enum ConfigError {
         #[source]
         source: serde_json::Error,
     },
+    /// Invalid configuration value.
+    #[error("invalid configuration for '{field}': {reason}")]
+    InvalidValue {
+        /// Configuration field name.
+        field: &'static str,
+        /// Explanation of why the value is invalid.
+        reason: String,
+    },
 }
 
 impl EngineConfig {
-    /// Loads configuration from a JSON file.
+    /// Returns a new builder to construct an [`EngineConfig`].
+    #[must_use]
+    pub fn builder() -> EngineConfigBuilder {
+        EngineConfigBuilder::default()
+    }
+
+    /// Loads configuration from a JSON file and validates its parameters.
     ///
     /// # Errors
-    /// Returns [`ConfigError::Io`] if the file cannot be read, or [`ConfigError::Json`]
-    /// if the file contains invalid JSON structure.
+    /// Returns [`ConfigError::Io`] if the file cannot be read, [`ConfigError::Json`]
+    /// if the file contains invalid JSON structure, or [`ConfigError::InvalidValue`]
+    /// if any configuration values violate invariant constraints.
     pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let path_ref = path.as_ref();
         let path_str = path_ref.to_string_lossy().to_string();
@@ -74,12 +105,122 @@ impl EngineConfig {
             path: path_str.clone(),
             source,
         })?;
-        let config: Self =
-            serde_json::from_str(&content).map_err(|source| ConfigError::Json {
-                path: path_str,
-                source,
-            })?;
+        let config: Self = serde_json::from_str(&content).map_err(|source| ConfigError::Json {
+            path: path_str,
+            source,
+        })?;
+        config.validate()?;
         Ok(config)
+    }
+
+    /// Validates configuration parameters against runtime constraints.
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::InvalidValue`] if any field violates invariant constraints.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.host.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "host",
+                reason: "host address cannot be empty".to_string(),
+            });
+        }
+        if self.max_batch_size == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "max_batch_size",
+                reason: "max_batch_size must be greater than 0".to_string(),
+            });
+        }
+        if self.block_size == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "block_size",
+                reason: "block_size must be greater than 0".to_string(),
+            });
+        }
+        if self.max_num_blocks == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "max_num_blocks",
+                reason: "max_num_blocks must be greater than 0".to_string(),
+            });
+        }
+        if self.num_gpu_blocks == 0 {
+            return Err(ConfigError::InvalidValue {
+                field: "num_gpu_blocks",
+                reason: "num_gpu_blocks must be greater than 0".to_string(),
+            });
+        }
+        if self.mojo_library_path.is_empty() {
+            return Err(ConfigError::InvalidValue {
+                field: "mojo_library_path",
+                reason: "mojo_library_path cannot be empty".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Builder for [`EngineConfig`].
+#[derive(Debug, Clone, Default)]
+pub struct EngineConfigBuilder {
+    config: EngineConfig,
+}
+
+impl EngineConfigBuilder {
+    /// Sets the host IP address.
+    #[must_use]
+    pub fn host(mut self, host: impl Into<String>) -> Self {
+        self.config.host = host.into();
+        self
+    }
+
+    /// Sets the port number.
+    #[must_use]
+    pub const fn port(mut self, port: u16) -> Self {
+        self.config.port = port;
+        self
+    }
+
+    /// Sets the max batch size.
+    #[must_use]
+    pub const fn max_batch_size(mut self, size: usize) -> Self {
+        self.config.max_batch_size = size;
+        self
+    }
+
+    /// Sets the block size.
+    #[must_use]
+    pub const fn block_size(mut self, size: usize) -> Self {
+        self.config.block_size = size;
+        self
+    }
+
+    /// Sets the max number of memory blocks in host RAM.
+    #[must_use]
+    pub const fn max_num_blocks(mut self, num: usize) -> Self {
+        self.config.max_num_blocks = num;
+        self
+    }
+
+    /// Sets the number of GPU blocks.
+    #[must_use]
+    pub const fn num_gpu_blocks(mut self, num: usize) -> Self {
+        self.config.num_gpu_blocks = num;
+        self
+    }
+
+    /// Sets the Mojo library file path.
+    #[must_use]
+    pub fn mojo_library_path(mut self, path: impl Into<String>) -> Self {
+        self.config.mojo_library_path = path.into();
+        self
+    }
+
+    /// Builds and validates the [`EngineConfig`].
+    ///
+    /// # Errors
+    /// Returns [`ConfigError::InvalidValue`] if configuration validation fails.
+    pub fn build(self) -> Result<EngineConfig, ConfigError> {
+        self.config.validate()?;
+        Ok(self.config)
     }
 }
 
@@ -102,6 +243,97 @@ mod tests {
         let config: EngineConfig =
             serde_json::from_str(json).expect("valid JSON should deserialize");
         assert_eq!(config, EngineConfig::default());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_builder_pattern() {
+        let config = EngineConfig::builder()
+            .host("0.0.0.0")
+            .port(9090)
+            .max_batch_size(64)
+            .block_size(32)
+            .max_num_blocks(2048)
+            .num_gpu_blocks(1024)
+            .mojo_library_path("target/libmojo_kernel.so")
+            .build()
+            .expect("valid builder configuration");
+
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.port, 9090);
+        assert_eq!(config.max_batch_size, 64);
+        assert_eq!(config.block_size, 32);
+        assert_eq!(config.max_num_blocks, 2048);
+        assert_eq!(config.num_gpu_blocks, 1024);
+        assert_eq!(config.mojo_library_path, "target/libmojo_kernel.so");
+    }
+
+    #[test]
+    fn test_validation_errors() {
+        let mut config = EngineConfig::default();
+        config.host.clear();
+        assert!(matches!(
+            config.validate().unwrap_err(),
+            ConfigError::InvalidValue { field: "host", .. }
+        ));
+
+        config = EngineConfig::default();
+        config.max_batch_size = 0;
+        assert!(matches!(
+            config.validate().unwrap_err(),
+            ConfigError::InvalidValue {
+                field: "max_batch_size",
+                ..
+            }
+        ));
+
+        config = EngineConfig::default();
+        config.block_size = 0;
+        assert!(matches!(
+            config.validate().unwrap_err(),
+            ConfigError::InvalidValue {
+                field: "block_size",
+                ..
+            }
+        ));
+
+        config = EngineConfig::default();
+        config.max_num_blocks = 0;
+        assert!(matches!(
+            config.validate().unwrap_err(),
+            ConfigError::InvalidValue {
+                field: "max_num_blocks",
+                ..
+            }
+        ));
+
+        config = EngineConfig::default();
+        config.num_gpu_blocks = 0;
+        assert!(matches!(
+            config.validate().unwrap_err(),
+            ConfigError::InvalidValue {
+                field: "num_gpu_blocks",
+                ..
+            }
+        ));
+
+        config = EngineConfig::default();
+        config.mojo_library_path.clear();
+        assert!(matches!(
+            config.validate().unwrap_err(),
+            ConfigError::InvalidValue {
+                field: "mojo_library_path",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn test_display_formatting() {
+        let config = EngineConfig::default();
+        let display_str = format!("{config}");
+        assert!(display_str.contains("127.0.0.1"));
+        assert!(display_str.contains("8080"));
     }
 
     #[test]
@@ -133,4 +365,3 @@ mod tests {
         let _ = fs::remove_file(file_path);
     }
 }
-

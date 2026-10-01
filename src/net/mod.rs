@@ -5,8 +5,13 @@ pub mod http;
 pub mod request_processor;
 
 pub use grpc::EngineInferenceService;
-pub use http::start_http_server;
-pub use request_processor::{validate_request, InferenceRequest, RequestValidationError};
+pub use http::{
+    create_router, start_http_server, HttpCompletionRequest, HttpCompletionResponse,
+    HttpServerError,
+};
+pub use request_processor::{
+    validate_request, InferenceRequest, InferenceRequestBuilder, RequestValidationError,
+};
 
 /// Network frontend server stub.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -19,4 +24,3 @@ impl NetworkServer {
         Self
     }
 }
-

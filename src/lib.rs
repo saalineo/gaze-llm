@@ -11,7 +11,9 @@ pub mod ffi;
 pub mod memory;
 pub mod net;
 pub mod scheduler;
+pub mod tokenizer;
 pub mod weights;
+
 
 /// Returns the engine version string.
 #[must_use]

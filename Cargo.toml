@@ -17,6 +17,7 @@ tracing-subscriber = "0.3"
 libc = "0.2"
 libloading = "0.8"
 thiserror = "2.0.21"
+tokenizers = "0.23.2"
 
 [dev-dependencies]
 tower = { version = "0.4", features = ["util"] }

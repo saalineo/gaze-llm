@@ -64,11 +64,17 @@ pub struct HttpCompletionResponse {
     pub tokens: Vec<u32>,
 }
 
+use crate::net::sse::create_token_stream;
+
 /// Constructs the Axum HTTP router with all engine endpoints configured.
 pub fn create_router() -> Router {
     Router::new()
         .route("/health", get(health_handler))
         .route("/v1/completions", post(handle_completion))
+        .route(
+            "/v1/completions/stream",
+            post(handle_streaming_completion_post).get(handle_streaming_completion_get),
+        )
 }
 
 async fn health_handler() -> &'static str {
@@ -81,6 +87,28 @@ async fn handle_completion(Json(payload): Json<HttpCompletionRequest>) -> impl I
         tokens: vec![100, 101],
     };
     (StatusCode::OK, Json(response))
+}
+
+async fn handle_streaming_completion_post(
+    Json(payload): Json<HttpCompletionRequest>,
+) -> impl IntoResponse {
+    let tokens = vec![
+        "Echo: ".to_string(),
+        payload.prompt,
+        " [DONE]".to_string(),
+    ];
+    let stream = tokio_stream::iter(tokens);
+    create_token_stream(stream)
+}
+
+async fn handle_streaming_completion_get() -> impl IntoResponse {
+    let tokens = vec![
+        "streaming ".to_string(),
+        "response ".to_string(),
+        "active".to_string(),
+    ];
+    let stream = tokio_stream::iter(tokens);
+    create_token_stream(stream)
 }
 
 /// Starts the Axum HTTP REST server bound to the address specified in `config`.
@@ -169,5 +197,72 @@ mod tests {
             serde_json::from_slice(&body).expect("valid completion response JSON");
         assert_eq!(parsed.text, "Echo: Hello");
         assert_eq!(parsed.tokens, vec![100, 101]);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_completions_post_endpoint() {
+        let app = create_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/completions/stream")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"prompt": "Rust"}"#))
+                    .expect("failed to build HTTP request"),
+            )
+            .await
+            .expect("service execution failed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .expect("content-type header missing"),
+            "text/event-stream"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("failed to read response body");
+        let body_str = String::from_utf8(body.to_vec()).expect("valid utf-8");
+        assert!(body_str.contains(r#"data: {"token":"Echo: "}"#));
+        assert!(body_str.contains(r#"data: {"token":"Rust"}"#));
+        assert!(body_str.contains(r#"data: {"token":" [DONE]"}"#));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_completions_get_endpoint() {
+        let app = create_router();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/v1/completions/stream")
+                    .body(Body::empty())
+                    .expect("failed to build HTTP request"),
+            )
+            .await
+            .expect("service execution failed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .expect("content-type header missing"),
+            "text/event-stream"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("failed to read response body");
+        let body_str = String::from_utf8(body.to_vec()).expect("valid utf-8");
+        assert!(body_str.contains(r#"data: {"token":"streaming "}"#));
+        assert!(body_str.contains(r#"data: {"token":"response "}"#));
+        assert!(body_str.contains(r#"data: {"token":"active"}"#));
     }
 }
